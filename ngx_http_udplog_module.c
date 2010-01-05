@@ -63,7 +63,7 @@ typedef struct {
 
 typedef struct {
     ngx_array_t                *logs;       /* array of ngx_http_udplog_t */
-    unsigned                    enabled;
+    unsigned                    off;
 } ngx_http_udplog_conf_t;
 
 ngx_int_t ngx_udp_connect(ngx_udp_connection_t *uc);
@@ -187,7 +187,7 @@ ngx_http_udplog_handler(ngx_http_request_t *r)
 
     ulcf = ngx_http_get_module_loc_conf(r, ngx_http_udplog_module);
 
-    if (!ulcf->enabled) {
+    if(ulcf->off) {
         return NGX_OK;
     }
 
@@ -354,14 +354,14 @@ ngx_http_udplog_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_log_fmt_t        *fmt;
     ngx_http_log_main_conf_t  *lmcf;
 
-    if(conf->logs || !conf->enabled) {
+    if(conf->logs || conf->off) {
         return NGX_CONF_OK;
     }
 
     conf->logs = prev->logs;
-    conf->enabled = prev->enabled;
+    conf->off = prev->off;
 
-    if(conf->logs || !conf->enabled) {
+    if(conf->logs || conf->off) {
         return NGX_CONF_OK;
     }
 
@@ -431,6 +431,7 @@ ngx_http_udplog_set_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     value = cf->args->elts;
 
     if (ngx_strcmp(value[1].data, "off") == 0) {
+        ulcf->off = 1;
         return NGX_CONF_OK;
     }
 
@@ -490,7 +491,6 @@ ngx_http_udplog_set_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             && ngx_strcasecmp(fmt[i].name.data, name.data) == 0)
         {
             log->format = &fmt[i];
-            ulcf->enabled = 1;
             goto facility;
         }
     }
