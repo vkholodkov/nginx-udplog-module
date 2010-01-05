@@ -9,9 +9,16 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include <nginx.h>
 
 #define NGX_UDPLOG_FACILITY_LOCAL7      23
 #define NGX_UDPLOG_SEVERITY_INFO        6
+
+#if defined nginx_version && nginx_version >= 8021
+typedef ngx_addr_t ngx_udplog_addr_t;
+#else
+typedef ngx_peer_addr_t ngx_udplog_addr_t;
+#endif
 
 typedef struct ngx_http_log_op_s  ngx_http_log_op_t;
 
@@ -48,7 +55,7 @@ typedef struct {
 typedef ngx_udplog_facility_t ngx_udplog_severity_t;
 
 typedef struct {
-    ngx_addr_t                 peer_addr;
+    ngx_udplog_addr_t                 peer_addr;
     ngx_udp_connection_t      *udp_connection;
 } ngx_udp_endpoint_t;
 
@@ -222,7 +229,11 @@ ngx_http_udplog_handler(ngx_http_request_t *r)
 
         len += sizeof("<255>") - 1 + sizeof("Jan 31 00:00:00") - 1 + 1 + ngx_cycle->hostname.len + 1;
 
+#if defined nginx_version && nginx_version >= 7003
         line = ngx_pnalloc(r->pool, len);
+#else
+        line = ngx_palloc(r->pool, len);
+#endif
         if (line == NULL) {
             return NGX_ERROR;
         }
@@ -265,7 +276,11 @@ static ngx_int_t ngx_udplog_init_endpoint(ngx_conf_t *cf, ngx_udp_endpoint_t *en
     uc->sockaddr = endpoint->peer_addr.sockaddr;
     uc->socklen = endpoint->peer_addr.socklen;
     uc->server = endpoint->peer_addr.name;
+#if defined nginx_version && nginx_version >= 7054
     uc->log = &cf->cycle->new_log;
+#else
+    uc->log = cf->cycle->new_log;
+#endif
 
     return NGX_OK;
 }
@@ -391,7 +406,7 @@ ngx_http_udplog_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 }
 
 static ngx_udp_endpoint_t *
-ngx_http_udplog_add_endpoint(ngx_conf_t *cf, ngx_addr_t *peer_addr)
+ngx_http_udplog_add_endpoint(ngx_conf_t *cf, ngx_udplog_addr_t *peer_addr)
 {
     ngx_http_udplog_main_conf_t    *umcf;
     ngx_udp_endpoint_t             *endpoint;
