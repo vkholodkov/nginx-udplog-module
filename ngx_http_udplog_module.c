@@ -1,6 +1,8 @@
 
 /*
- * Copyright (C) Valery Kholodkov
+ * Copyright (C) 2010 Valery Kholodkov
+ *
+ * NOTE: Some small fragments have been copied from original nginx log module due to exports problem.
  */
 
 
@@ -168,6 +170,9 @@ static ngx_udplog_severity_t ngx_udplog_severity[] = {
     { ngx_null_string, 0 }
 };
 
+/*
+ * See RFC 3164 chapter 4.1.2
+ */
 static char *months[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
 ngx_int_t
