@@ -38,7 +38,9 @@ struct ngx_http_log_op_s {
 
 typedef struct {
     ngx_str_t                   name;
+#if defined nginx_version && nginx_version >= 7018
     ngx_array_t                *flushes;
+#endif
     ngx_array_t                *ops;        /* array of ngx_http_log_op_t */
 } ngx_http_log_fmt_t;
 
@@ -214,7 +216,9 @@ ngx_http_udplog_handler(ngx_http_request_t *r)
             pri = NGX_UDPLOG_FACILITY_LOCAL7 * 8 + NGX_UDPLOG_SEVERITY_INFO;
         }
 
+#if defined nginx_version && nginx_version >= 7018
         ngx_http_script_flush_no_cacheable_variables(r, log[l].format->flushes);
+#endif
 
         len = 0;
         op = log[l].format->ops->elts;
