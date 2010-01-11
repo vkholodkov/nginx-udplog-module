@@ -280,7 +280,7 @@ static ngx_int_t ngx_udplog_init_endpoint(ngx_conf_t *cf, ngx_udp_endpoint_t *en
     uc->sockaddr = endpoint->peer_addr.sockaddr;
     uc->socklen = endpoint->peer_addr.socklen;
     uc->server = endpoint->peer_addr.name;
-#if defined nginx_version && nginx_version >= 7054
+#if defined nginx_version && ( nginx_version >= 7054 && nginx_version < 8032 )
     uc->log = &cf->cycle->new_log;
 #else
     uc->log = cf->cycle->new_log;
@@ -335,7 +335,11 @@ ngx_http_udplogger_send(ngx_udp_endpoint_t *l, u_char *buf, size_t len)
     }
 
     if ((size_t) n != (size_t) len) {
+#if defined nginx_version && nginx_version >= 8032
+        ngx_log_error(NGX_LOG_CRIT, &uc->log, 0, "send() incomplete");
+#else
         ngx_log_error(NGX_LOG_CRIT, uc->log, 0, "send() incomplete");
+#endif
         return NGX_ERROR;
     }
 
