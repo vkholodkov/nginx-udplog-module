@@ -45,6 +45,12 @@ typedef struct {
 } ngx_http_log_fmt_t;
 
 typedef struct {
+    ngx_str_t                value;
+    ngx_array_t             *lengths;
+    ngx_array_t             *values;
+} ngx_http_log_tag_template_t;
+
+typedef struct {
     ngx_array_t                 formats;    /* array of ngx_http_log_fmt_t */
     ngx_uint_t                  combined_used; /* unsigned  combined_used:1 */
 } ngx_http_log_main_conf_t;
@@ -64,8 +70,6 @@ typedef struct {
 typedef struct {
     ngx_udp_endpoint_t       *endpoint;
     ngx_http_log_fmt_t       *format;
-    ngx_uint_t                facility;
-    ngx_uint_t                severity;
 } ngx_http_udplog_t;
 
 typedef struct {
@@ -73,8 +77,11 @@ typedef struct {
 } ngx_http_udplog_main_conf_t;
 
 typedef struct {
-    ngx_array_t                *logs;       /* array of ngx_http_udplog_t */
-    unsigned                    off;
+    ngx_array_t                 *logs;       /* array of ngx_http_udplog_t */
+    unsigned                     off;
+    ngx_http_log_tag_template_t *tag;
+    ngx_uint_t                   facility;
+    ngx_uint_t                   severity;
 } ngx_http_udplog_conf_t;
 
 ngx_int_t ngx_udp_connect(ngx_udp_connection_t *uc);
@@ -88,6 +95,8 @@ static char *ngx_http_udplog_merge_loc_conf(ngx_conf_t *cf, void *parent,
     void *child);
 
 static char *ngx_http_udplog_set_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char *ngx_http_udplog_set_priority(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char *ngx_http_udplog_set_tag(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static ngx_int_t ngx_http_udplog_init(ngx_conf_t *cf);
 
@@ -100,6 +109,20 @@ static ngx_command_t  ngx_http_udplog_commands[] = {
       ngx_http_udplog_set_log,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
+      NULL },
+
+    { ngx_string("udplog_priority"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12,
+      ngx_http_udplog_set_priority,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      0,
+      NULL },
+
+    { ngx_string("udplog_tag"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_http_udplog_set_tag,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_udplog_conf_t, tag),
       NULL },
 
       ngx_null_command
@@ -166,7 +189,7 @@ static ngx_udplog_facility_t ngx_udplog_facilities[] = {
     { ngx_null_string, 0 }
 };
 
-static ngx_udplog_severity_t ngx_udplog_severity[] = {
+static ngx_udplog_severity_t ngx_udplog_severities[] = {
     { ngx_string("emerg"),      0 },
     { ngx_string("alert"),      1 },
     { ngx_string("crit"),       2 },
@@ -190,6 +213,7 @@ ngx_http_udplog_handler(ngx_http_request_t *r)
     u_char                   *line, *p;
     size_t                    len;
     ngx_uint_t                i, l, pri;
+    ngx_str_t                 tag;
     ngx_http_udplog_t        *log;
     ngx_http_log_op_t        *op;
     ngx_http_udplog_conf_t   *ulcf;
@@ -205,12 +229,26 @@ ngx_http_udplog_handler(ngx_http_request_t *r)
         return NGX_OK;
     }
 
+    if(ulcf->tag != NULL)
+    {
+        if (ngx_http_script_run(r, &tag, ulcf->tag->lengths->elts, 0, ulcf->tag->values->elts)
+            == NULL)
+        {
+            return NGX_ERROR;
+        }
+    }
+    else {
+        tag.data = (u_char*)"nginx";
+        tag.len = sizeof("nginx") - 1;
+    }
+
     time = ngx_time();
     ngx_gmtime(time, &tm);
 
     log = ulcf->logs->elts;
+    pri = ulcf->facility * 8 + ulcf->severity;
+
     for (l = 0; l < ulcf->logs->nelts; l++) {
-        pri = log[l].facility * 8 + log[l].severity;
 
         if(pri > 255) {
             pri = NGX_UDPLOG_FACILITY_LOCAL7 * 8 + NGX_UDPLOG_SEVERITY_INFO;
@@ -231,7 +269,8 @@ ngx_http_udplog_handler(ngx_http_request_t *r)
             }
         }
 
-        len += sizeof("<255>") - 1 + sizeof("Jan 31 00:00:00") - 1 + 1 + ngx_cycle->hostname.len + 1;
+        len += sizeof("<255>") - 1 + sizeof("Jan 31 00:00:00") - 1 + 1 + ngx_cycle->hostname.len + 1
+            + tag.len + 2;
 
 #if defined nginx_version && nginx_version >= 7003
         line = ngx_pnalloc(r->pool, len);
@@ -245,8 +284,8 @@ ngx_http_udplog_handler(ngx_http_request_t *r)
         /*
          * BSD syslog message header (see RFC 3164)
          */
-        p = ngx_sprintf(line, "<%ui>%s %2d %02d:%02d:%02d %V ", pri, months[tm.ngx_tm_mon - 1], tm.ngx_tm_mday,
-            tm.ngx_tm_hour, tm.ngx_tm_min, tm.ngx_tm_sec, &ngx_cycle->hostname);
+        p = ngx_sprintf(line, "<%ui>%s %2d %02d:%02d:%02d %V %V: ", pri, months[tm.ngx_tm_mon - 1], tm.ngx_tm_mday,
+            tm.ngx_tm_hour, tm.ngx_tm_min, tm.ngx_tm_sec, &ngx_cycle->hostname, &tag);
 
         for (i = 0; i < log[l].format->ops->nelts; i++) {
             p = op[i].run(r, p, &op[i]);
@@ -369,6 +408,9 @@ ngx_http_udplog_create_loc_conf(ngx_conf_t *cf)
         return NGX_CONF_ERROR;
     }
 
+    conf->facility = NGX_CONF_UNSET_UINT;
+    conf->severity = NGX_CONF_UNSET_UINT;
+
     return conf;
 }
 
@@ -378,9 +420,14 @@ ngx_http_udplog_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_udplog_conf_t *prev = parent;
     ngx_http_udplog_conf_t *conf = child;
 
-    ngx_http_udplog_t         *log;
-    ngx_http_log_fmt_t        *fmt;
-    ngx_http_log_main_conf_t  *lmcf;
+    if(conf->tag == NULL) {
+        conf->tag = prev->tag;
+    }
+
+    ngx_conf_merge_uint_value(conf->facility,
+                              prev->facility, NGX_UDPLOG_FACILITY_LOCAL7);
+    ngx_conf_merge_uint_value(conf->severity,
+                              prev->severity, NGX_UDPLOG_SEVERITY_INFO);
 
     if(conf->logs || conf->off) {
         return NGX_CONF_OK;
@@ -388,27 +435,6 @@ ngx_http_udplog_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
     conf->logs = prev->logs;
     conf->off = prev->off;
-
-    if(conf->logs || conf->off) {
-        return NGX_CONF_OK;
-    }
-
-    conf->logs = ngx_array_create(cf->pool, 2, sizeof(ngx_http_udplog_t));
-    if(conf->logs == NULL) {
-        return NGX_CONF_ERROR;
-    }
-
-    log = ngx_array_push(conf->logs);
-    if(log == NULL) {
-        return NGX_CONF_ERROR;
-    }
-
-    lmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_log_module);
-    fmt = lmcf->formats.elts;
-
-    /* the default "combined" format */
-    log->format = &fmt[0];
-    lmcf->combined_used = 1;
 
     return NGX_CONF_OK;
 }
@@ -436,12 +462,6 @@ ngx_http_udplog_add_endpoint(ngx_conf_t *cf, ngx_udplog_addr_t *peer_addr)
     endpoint->peer_addr = *peer_addr;
 
     return endpoint;
-}
-
-static ngx_int_t
-ngx_http_udplog_set_facility_and_severity(ngx_http_udplog_t *log, ngx_str_t *value)
-{
-    return NGX_OK;
 }
 
 static char *
@@ -519,7 +539,7 @@ ngx_http_udplog_set_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             && ngx_strcasecmp(fmt[i].name.data, name.data) == 0)
         {
             log->format = &fmt[i];
-            goto facility;
+            goto done;
         }
     }
 
@@ -527,12 +547,104 @@ ngx_http_udplog_set_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                        "unknown log format \"%V\"", &name);
     return NGX_CONF_ERROR;
 
-facility:
-    log->facility = NGX_UDPLOG_FACILITY_LOCAL7;
-    log->severity = NGX_UDPLOG_SEVERITY_INFO;
+done:
 
-    if(cf->args->nelts == 4) {
-        if(ngx_http_udplog_set_facility_and_severity(log, &value[3]) != NGX_OK) {
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_udplog_set_priority(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_udplog_conf_t     *ulcf = conf;
+    ngx_str_t                  *value;
+    ngx_udplog_facility_t      *f;
+    ngx_udplog_severity_t      *s;
+
+    value = cf->args->elts;
+
+    f = ngx_udplog_facilities;
+
+    while(f->name.data != NULL) {
+        if(ngx_strncmp(f->name.data, value[1].data, f->name.len) == 0)
+            break;
+
+        f++;
+    }
+
+    if(f->name.data != NULL) {
+        ulcf->facility = f->number;
+    }
+    else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "unknown facility \"%V\"", &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    if (cf->args->nelts == 3) {
+        s = ngx_udplog_severities;
+
+        while(s->name.data != NULL) {
+            if(ngx_strncmp(s->name.data, value[2].data, s->name.len) == 0)
+                break;
+
+            s++;
+        }
+
+        if(s->name.data != NULL) {
+            ulcf->severity = s->number;
+        }
+        else {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "unknown severity \"%V\"", &value[2]);
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_udplog_set_tag(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_int_t                   n;
+    ngx_str_t                  *value;
+    ngx_http_script_compile_t   sc;
+    ngx_http_log_tag_template_t **field, *h;
+
+    field = (ngx_http_log_tag_template_t**) (((u_char*)conf) + cmd->offset);
+
+    value = cf->args->elts;
+
+    if (*field == NULL) {
+        *field = ngx_palloc(cf->pool, sizeof(ngx_http_log_tag_template_t));
+        if (*field == NULL) {
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    h = *field;
+
+    h->value = value[1];
+    h->lengths = NULL;
+    h->values = NULL;
+
+    /*
+     * Compile field name
+     */
+    n = ngx_http_script_variables_count(&value[1]);
+
+    if (n > 0) {
+        ngx_memzero(&sc, sizeof(ngx_http_script_compile_t));
+
+        sc.cf = cf;
+        sc.source = &value[1];
+        sc.lengths = &h->lengths;
+        sc.values = &h->values;
+        sc.variables = n;
+        sc.complete_lengths = 1;
+        sc.complete_values = 1;
+
+        if (ngx_http_script_compile(&sc) != NGX_OK) {
             return NGX_CONF_ERROR;
         }
     }
