@@ -231,10 +231,15 @@ ngx_http_udplog_handler(ngx_http_request_t *r)
 
     if(ulcf->tag != NULL)
     {
-        if (ngx_http_script_run(r, &tag, ulcf->tag->lengths->elts, 0, ulcf->tag->values->elts)
-            == NULL)
-        {
-            return NGX_ERROR;
+        if(ulcf->tag->lengths == NULL) {
+            tag = ulcf->tag->value;
+        }
+        else{
+            if (ngx_http_script_run(r, &tag, ulcf->tag->lengths->elts, 0, ulcf->tag->values->elts)
+                == NULL)
+            {
+                return NGX_ERROR;
+            }
         }
     }
     else {
