@@ -512,10 +512,11 @@ ngx_http_udplog_set_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     ngx_memzero(&u, sizeof(ngx_url_t));
 
-    u.host = value[1];
-    u.port = 514;
+    u.url = value[1];
+    u.default_port = 514;
+    u.no_resolve = 0;
 
-    if(ngx_inet_resolve_host(cf->pool, &u) != NGX_OK) {
+    if(ngx_parse_url(cf->pool, &u) != NGX_OK) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "%V: %s", &u.host, u.err);
         return NGX_CONF_ERROR;
     }
