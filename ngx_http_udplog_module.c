@@ -364,6 +364,11 @@ ngx_http_udplogger_send(ngx_udp_endpoint_t *l, u_char *buf, size_t len)
 
     if (uc->connection == NULL) {
         if(ngx_udp_connect(uc) != NGX_OK) {
+            if(uc->connection != NULL) {
+                ngx_free_connection(uc->connection);
+                uc->connection = NULL;
+            }
+
             return NGX_ERROR;
         }
 
