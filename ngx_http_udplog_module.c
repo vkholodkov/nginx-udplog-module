@@ -328,6 +328,11 @@ static ngx_int_t ngx_udplog_init_endpoint(ngx_conf_t *cf, ngx_udp_endpoint_t *en
     uc->log = &cf->cycle->new_log;
 #else
     uc->log = cf->cycle->new_log;
+#if defined nginx_version && nginx_version >= 8032
+    uc->log.handler = NULL;
+    uc->log.data = NULL;
+    uc->log.action = "logging";
+#endif
 #endif
 
     return NGX_OK;
