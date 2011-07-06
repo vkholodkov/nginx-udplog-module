@@ -1,3 +1,11 @@
+Two differences from the original work:
+- the default for udplog is off.
+- access_udplog takes an optional 3rd argument "bare":
+      access_udplog 1.1.1.1:100 loghost bare;
+
+If bare is specified, the message is sent exactly as specified in the logformat directive without any change.
+This can be used for udp logging to non-syslog hosts.
+
 
 Documentation for this module could be found under following URLs:
 

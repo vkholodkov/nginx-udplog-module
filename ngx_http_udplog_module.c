@@ -1,4 +1,3 @@
-
 /*
  * Copyright (C) 2010 Valery Kholodkov
  *
@@ -70,6 +69,7 @@ typedef struct {
 typedef struct {
     ngx_udp_endpoint_t       *endpoint;
     ngx_http_log_fmt_t       *format;
+    ngx_uint_t                bare:1;
 } ngx_http_udplog_t;
 
 typedef struct {
@@ -105,7 +105,7 @@ static ngx_command_t  ngx_http_udplog_commands[] = {
 
     { ngx_string("access_udplog"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF
-                        |NGX_HTTP_LMT_CONF|NGX_CONF_TAKE123,
+                        |NGX_HTTP_LMT_CONF|NGX_CONF_TAKE1234,
       ngx_http_udplog_set_log,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
@@ -289,9 +289,12 @@ ngx_http_udplog_handler(ngx_http_request_t *r)
         /*
          * BSD syslog message header (see RFC 3164)
          */
-        p = ngx_sprintf(line, "<%ui>%s %2d %02d:%02d:%02d %V %V: ", pri, months[tm.ngx_tm_mon - 1], tm.ngx_tm_mday,
-            tm.ngx_tm_hour, tm.ngx_tm_min, tm.ngx_tm_sec, &ngx_cycle->hostname, &tag);
-
+	if(!log[l].bare){
+	  p = ngx_sprintf(line, "<%ui>%s %2d %02d:%02d:%02d %V %V: ", pri, months[tm.ngx_tm_mon - 1], tm.ngx_tm_mday,
+			  tm.ngx_tm_hour, tm.ngx_tm_min, tm.ngx_tm_sec, &ngx_cycle->hostname, &tag);
+	}else{
+	  p = line;
+	}
         for (i = 0; i < log[l].format->ops->nelts; i++) {
             p = op[i].run(r, p, &op[i]);
         }
@@ -422,7 +425,7 @@ ngx_http_udplog_create_loc_conf(ngx_conf_t *cf)
     if (conf == NULL) {
         return NGX_CONF_ERROR;
     }
-
+    conf->off = 1;
     conf->facility = NGX_CONF_UNSET_UINT;
     conf->severity = NGX_CONF_UNSET_UINT;
 
@@ -497,6 +500,7 @@ ngx_http_udplog_set_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         ulcf->off = 1;
         return NGX_CONF_OK;
     }
+    ulcf->off = 0;
 
     if (ulcf->logs == NULL) {
         ulcf->logs = ngx_array_create(cf->pool, 2, sizeof(ngx_http_udplog_t));
@@ -536,7 +540,7 @@ ngx_http_udplog_set_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     if(log->endpoint == NULL) {
         return NGX_CONF_ERROR;
     }
-
+    log->bare = 0;
     if (cf->args->nelts >= 3) {
         name = value[2];
 
@@ -548,7 +552,11 @@ ngx_http_udplog_set_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         name.data = (u_char *) "combined";
         lmcf->combined_used = 1;
     }
-
+    if (cf->args->nelts >= 4) {
+      if (ngx_strcmp(value[3].data, "bare") == 0) {
+	log->bare = 1;
+      }
+    }
     fmt = lmcf->formats.elts;
     for (i = 0; i < lmcf->formats.nelts; i++) {
         if (fmt[i].name.len == name.len
@@ -567,6 +575,7 @@ done:
 
     return NGX_CONF_OK;
 }
+
 
 static char *
 ngx_http_udplog_set_priority(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
